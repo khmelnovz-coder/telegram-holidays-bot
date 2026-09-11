@@ -131,10 +131,14 @@ export default async function handler(
     }
   } catch (error) {
     console.error("Webhook processing failed", error);
-    await sendTelegramMessage(
-      message.chat.id,
-      "Не удалось получить праздники. Попробуйте еще раз позже.",
-    );
+    try {
+      await sendTelegramMessage(
+        message.chat.id,
+        "Не удалось получить праздники. Попробуйте еще раз позже.",
+      );
+    } catch (notificationError) {
+      console.error("Failed to send webhook error notification", notificationError);
+    }
   }
 
   response.status(200).json({ ok: true });
