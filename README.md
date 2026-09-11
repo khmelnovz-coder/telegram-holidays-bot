@@ -16,6 +16,8 @@ Telegram-бот на TypeScript/Node.js, который по команде `/to
 
 6. Откройте чат с ботом и отправьте `/start`, `/help` или `/today`.
 
+Конфигурация не задает `outputDirectory`: `api/webhook.ts` распознается Vercel как serverless function по соглашению каталога `api`. Если в панели проекта осталась ошибка о каталоге `public`, очистите поле **Output Directory** в **Settings → Build and Deployment** и отключите переопределяющий build preset; для этого проекта статический output directory не нужен.
+
 ## Локальная проверка
 
 Требуется Node.js 20+:
