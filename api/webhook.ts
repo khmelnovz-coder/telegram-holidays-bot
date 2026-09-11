@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { chromium } from "@sparticuz/chromium";
+import chromium from "@sparticuz/chromium";
 import { type Browser, chromium as playwrightChromium } from "playwright-core";
 
 const HOLIDAYS_URL = "https://kakoysegodnyaprazdnik.ru/";
