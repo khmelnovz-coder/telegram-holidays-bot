@@ -25,8 +25,10 @@ function parseHolidayText(text: string, date: string): HolidayResult {
 
   const candidates = lines.filter((line) => {
     if (line.length < 4 || line.length > 180) return false;
-    if (/^(меню|подписаться|войти|главная|новости|реклама)$/i.test(line)) return false;
-    return /праздник|день|торжеств|памят/i.test(line);
+    if (/^(меню|подписаться|войти|главная|новости|реклама|сегодня)$/i.test(line)) {
+      return false;
+    }
+    return /праздник|день|торжеств|памят|событ/i.test(line);
   });
 
   const holidays = [...new Set(candidates)].filter(
@@ -44,9 +46,11 @@ async function getTodayHolidays(): Promise<HolidayResult> {
   let browser: Browser | undefined;
 
   try {
+    const executablePath = await chromium.executablePath();
+    console.info("Holiday browser starting", { executablePath });
     browser = await playwrightChromium.launch({
       args: chromium.args,
-      executablePath: await chromium.executablePath(),
+      executablePath,
       headless: true,
     });
 
@@ -55,21 +59,56 @@ async function getTodayHolidays(): Promise<HolidayResult> {
       userAgent:
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
     });
-    await page.goto(HOLIDAYS_URL, { waitUntil: "domcontentloaded", timeout: 20_000 });
-    await page.waitForTimeout(1_500);
+    const navigation = await page.goto(HOLIDAYS_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    });
+    console.info("Holiday page loaded", {
+      status: navigation?.status() ?? null,
+      url: page.url(),
+      title: await page.title(),
+    });
+
+    const challengeButton = page.locator("#cont");
+    if (await challengeButton.count()) {
+      console.info("Holiday site security challenge detected");
+      await page.waitForTimeout(2_000);
+      if (await challengeButton.isVisible()) {
+        await challengeButton.click({ timeout: 5_000 });
+        await page.waitForTimeout(2_000);
+      }
+    }
 
     const bodyText = await page.locator("body").innerText();
+    console.info("Holiday page text collected", {
+      url: page.url(),
+      characters: bodyText.length,
+      preview: bodyText.slice(0, 200),
+    });
     if (/проверка безопасности|enable javascript|captcha/i.test(bodyText)) {
       throw new Error("Сайт запросил проверку безопасности");
     }
 
+    const structuredText = await page
+      .locator("h1, h2, h3, h4, li, article p, .holiday, .holidays")
+      .allInnerTexts();
+    const parsedText = [...structuredText, bodyText].join("\n");
     const date = new Intl.DateTimeFormat("ru-RU", {
       dateStyle: "long",
       timeZone: "Europe/Moscow",
     }).format(new Date());
-    return parseHolidayText(bodyText, date);
+    return parseHolidayText(parsedText, date);
+  } catch (error) {
+    console.error("Holiday scraper failed", error);
+    throw error;
   } finally {
-    await browser?.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (error) {
+        console.error("Holiday browser close failed", error);
+      }
+    }
   }
 }
 
