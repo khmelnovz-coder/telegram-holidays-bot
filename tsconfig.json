@@ -8,8 +8,9 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "rootDir": ".",
     "outDir": "dist",
     "types": ["node", "@vercel/node"]
   },
-  "include": ["api/**/*.ts", "src/**/*.ts"]
+  "include": ["api/**/*.ts", "scraper/**/*.ts", "src/**/*.ts"]
 }
