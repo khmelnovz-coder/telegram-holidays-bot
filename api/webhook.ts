@@ -1,9 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import chromium from "@sparticuz/chromium";
-import { type Browser, chromium as playwrightChromium } from "playwright-core";
 
-const HOLIDAYS_URL = "https://kakoysegodnyaprazdnik.ru/";
 const TELEGRAM_API = "https://api.telegram.org";
+const SCRAPER_REQUEST_TIMEOUT_MS = 25_000;
 
 interface TelegramUpdate {
   message?: {
@@ -17,98 +15,36 @@ interface HolidayResult {
   holidays: string[];
 }
 
-function parseHolidayText(text: string, date: string): HolidayResult {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-
-  const candidates = lines.filter((line) => {
-    if (line.length < 4 || line.length > 180) return false;
-    if (/^(меню|подписаться|войти|главная|новости|реклама|сегодня)$/i.test(line)) {
-      return false;
-    }
-    return /праздник|день|торжеств|памят|событ/i.test(line);
-  });
-
-  const holidays = [...new Set(candidates)].filter(
-    (line) => !/какой сегодня праздник|праздники сегодня/i.test(line),
-  );
-
-  if (holidays.length === 0) {
-    throw new Error("На странице не найден список праздников");
+async function getTodayHolidays(): Promise<HolidayResult> {
+  const scraperUrl = process.env.SCRAPER_URL?.replace(/\/+$/, "");
+  const scraperApiKey = process.env.SCRAPER_API_KEY;
+  if (!scraperUrl || !scraperApiKey) {
+    throw new Error("SCRAPER_URL или SCRAPER_API_KEY не заданы");
   }
 
-  return { date, holidays };
-}
-
-async function getTodayHolidays(): Promise<HolidayResult> {
-  let browser: Browser | undefined;
-
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SCRAPER_REQUEST_TIMEOUT_MS);
   try {
-    const executablePath = await chromium.executablePath();
-    console.info("Holiday browser starting", { executablePath });
-    browser = await playwrightChromium.launch({
-      args: chromium.args,
-      executablePath,
-      headless: true,
+    const scraperResponse = await fetch(`${scraperUrl}/today`, {
+      headers: { "x-api-key": scraperApiKey },
+      signal: controller.signal,
     });
-
-    const page = await browser.newPage({
-      locale: "ru-RU",
-      userAgent:
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-    });
-    const navigation = await page.goto(HOLIDAYS_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 20_000,
-    });
-    console.info("Holiday page loaded", {
-      status: navigation?.status() ?? null,
-      url: page.url(),
-      title: await page.title(),
-    });
-
-    const challengeButton = page.locator("#cont");
-    if (await challengeButton.count()) {
-      console.info("Holiday site security challenge detected");
-      await page.waitForTimeout(2_000);
-      if (await challengeButton.isVisible()) {
-        await challengeButton.click({ timeout: 5_000 });
-        await page.waitForTimeout(2_000);
-      }
+    const body = await scraperResponse.text();
+    if (!scraperResponse.ok) {
+      console.error("Scraper API error", scraperResponse.status, body);
+      throw new Error(`Scraper API вернул ${scraperResponse.status}`);
     }
 
-    const bodyText = await page.locator("body").innerText();
-    console.info("Holiday page text collected", {
-      url: page.url(),
-      characters: bodyText.length,
-      preview: bodyText.slice(0, 200),
-    });
-    if (/проверка безопасности|enable javascript|captcha/i.test(bodyText)) {
-      throw new Error("Сайт запросил проверку безопасности");
+    const result = JSON.parse(body) as HolidayResult;
+    if (!result.date || !Array.isArray(result.holidays) || result.holidays.length === 0) {
+      throw new Error("Scraper API вернул некорректный список праздников");
     }
-
-    const structuredText = await page
-      .locator("h1, h2, h3, h4, li, article p, .holiday, .holidays")
-      .allInnerTexts();
-    const parsedText = [...structuredText, bodyText].join("\n");
-    const date = new Intl.DateTimeFormat("ru-RU", {
-      dateStyle: "long",
-      timeZone: "Europe/Moscow",
-    }).format(new Date());
-    return parseHolidayText(parsedText, date);
+    return result;
   } catch (error) {
-    console.error("Holiday scraper failed", error);
+    console.error("Scraper request failed", error);
     throw error;
   } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (error) {
-        console.error("Holiday browser close failed", error);
-      }
-    }
+    clearTimeout(timeout);
   }
 }
 

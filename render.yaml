@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: telegram-holidays-scraper
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: SCRAPER_API_KEY
+        sync: false

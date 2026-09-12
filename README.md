@@ -1,12 +1,34 @@
 # Telegram Holidays Bot
 
-Telegram-бот на TypeScript/Node.js, который по команде `/today` получает праздники текущего дня с [kakoysegodnyaprazdnik.ru](https://kakoysegodnyaprazdnik.ru/). Обход возможного 403 выполняется в браузере Chromium через `playwright-core` и `@sparticuz/chromium`; постоянный процесс не используется.
+Telegram-бот на TypeScript/Node.js, который по команде `/today` получает праздники текущего дня с [kakoysegodnyaprazdnik.ru](https://kakoysegodnyaprazdnik.ru/). Chromium вынесен в отдельный HTTP-сервис `scraper/server.ts`, предназначенный для деплоя на Render. Vercel serverless function только вызывает этот сервис и не запускает браузер.
+
+Сайт может отдавать Cloudflare/security challenge или блокировать автоматизированный браузер. Сервис использует persistent Chromium context, реалистичные заголовки и user-agent и логирует обнаружение challenge, но не гарантирует его обход.
+
+## Деплой scraper на Render
+
+1. Создайте новый Render Web Service из этого репозитория. Render обнаружит `Dockerfile` (или используйте `render.yaml`).
+2. Задайте секретную переменную `SCRAPER_API_KEY` в настройках Render. Используйте длинное случайное значение; не добавляйте его в git.
+3. После деплоя проверьте публичный health endpoint:
+
+   ```bash
+   curl https://<scraper-домен>.onrender.com/health
+   ```
+
+   Ожидаемый ответ: `{"ok":true}`.
+4. Проверьте защищённый endpoint:
+
+   ```bash
+   curl -H "x-api-key: <SCRAPER_API_KEY>" \
+     https://<scraper-домен>.onrender.com/today
+   ```
+
+Render запускает Dockerfile на `0.0.0.0:$PORT`; сервис поддерживает `GET` и `POST /today`, `GET /health`.
 
 ## Деплой на Vercel
 
 1. Создайте бота в Telegram через [@BotFather](https://t.me/BotFather): `/newbot`, задайте имя и username, сохраните выданный токен.
 2. Импортируйте репозиторий в Vercel и выберите Node.js проект.
-3. В настройках Vercel добавьте переменную окружения `TELEGRAM_BOT_TOKEN` со значением из BotFather. Настоящий токен не нужно добавлять в git.
+3. В настройках Vercel добавьте `TELEGRAM_BOT_TOKEN`, `SCRAPER_URL` (например, `https://<scraper-домен>.onrender.com`) и тот же `SCRAPER_API_KEY`, который задан в Render. Настоящие значения не нужно добавлять в git.
 4. Выполните деплой. Endpoint webhook будет доступен по адресу `https://<ваш-домен>.vercel.app/api/webhook`.
 5. Установите webhook, подставив токен и домен:
 
@@ -30,6 +52,6 @@ npm run typecheck
 npm run build
 ```
 
-Для проверки webhook локально запустите `vercel dev`, затем используйте туннель (например, ngrok) и укажите Telegram URL вида `https://<туннель>/api/webhook` через `setWebhook`. Команда `/today` запускает Chromium в рамках одного запроса и закрывает браузер после парсинга.
+Для локальной проверки scraper задайте `SCRAPER_API_KEY`, затем выполните `npm run build` и `PORT=3000 npm run start:scraper`. В другом терминале вызовите `curl -H "x-api-key: $SCRAPER_API_KEY" http://localhost:3000/today`. Для проверки webhook запустите `vercel dev`, задайте `SCRAPER_URL=http://localhost:3000` и используйте туннель (например, ngrok), указав Telegram URL вида `https://<туннель>/api/webhook` через `setWebhook`.
 
 Бот намеренно не хранит подписчиков и не выполняет рассылку: он отвечает только на входящие команды.

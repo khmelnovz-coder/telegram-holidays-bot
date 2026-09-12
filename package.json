@@ -5,7 +5,8 @@
   "description": "Telegram bot that replies with today's holidays",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc"
+    "build": "tsc",
+    "start:scraper": "node dist/scraper/server.js"
   },
   "dependencies": {
     "@sparticuz/chromium": "^133.0.0",
