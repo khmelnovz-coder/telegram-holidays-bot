@@ -1,7 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import chromium from "@sparticuz/chromium";
-import { type BrowserContext, chromium as playwrightChromium } from "playwright-core";
+import type { BrowserContext } from "playwright-core";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const HOLIDAYS_URL = "https://kakoysegodnyaprazdnik.ru/";
@@ -40,6 +39,10 @@ function parseHolidayText(text: string, date: string): HolidayResult {
 async function getBrowserContext(): Promise<BrowserContext> {
   if (!contextPromise) {
     contextPromise = (async () => {
+      const [{ default: chromium }, { chromium: playwrightChromium }] = await Promise.all([
+        import("@sparticuz/chromium"),
+        import("playwright-core"),
+      ]);
       await mkdir(PROFILE_DIR, { recursive: true });
       const executablePath = await chromium.executablePath();
       console.info("Holiday browser starting", { executablePath, profileDir: PROFILE_DIR });
@@ -149,6 +152,11 @@ function handler(request: IncomingMessage, response: ServerResponse): void {
   });
 }
 
-createServer(handler).listen(PORT, "0.0.0.0", () => {
+const server = createServer(handler);
+server.on("error", (error) => {
+  console.error("Holiday scraper server failed", error);
+  process.exitCode = 1;
+});
+server.listen(PORT, "0.0.0.0", () => {
   console.info(`Holiday scraper listening on ${PORT}`);
 });
