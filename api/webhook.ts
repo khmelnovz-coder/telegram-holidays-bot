@@ -73,18 +73,30 @@ async function getTodayHolidays(): Promise<HolidayResult> {
   }
 }
 
-async function sendTelegramMessage(chatId: number, text: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан");
+async function sendTelegramMessage(chatId: number, text: string): Promise<boolean> {
+  try {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
+      console.error("Telegram API error", 0, "TELEGRAM_BOT_TOKEN не задан");
+      return false;
+    }
 
-  const response = await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }),
-  });
+    const response = await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+    const body = await response.text();
 
-  if (!response.ok) {
-    throw new Error(`Telegram API вернул ${response.status}`);
+    if (!response.ok) {
+      console.error("Telegram API error", response.status, body);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Telegram API request failed", error);
+    return false;
   }
 }
 
@@ -131,14 +143,10 @@ export default async function handler(
     }
   } catch (error) {
     console.error("Webhook processing failed", error);
-    try {
-      await sendTelegramMessage(
-        message.chat.id,
-        "Не удалось получить праздники. Попробуйте еще раз позже.",
-      );
-    } catch (notificationError) {
-      console.error("Failed to send webhook error notification", notificationError);
-    }
+    await sendTelegramMessage(
+      message.chat.id,
+      "Не удалось получить праздники. Попробуйте еще раз позже.",
+    );
   }
 
   response.status(200).json({ ok: true });
