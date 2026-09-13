@@ -84,7 +84,7 @@ async function getBrowser(): Promise<Browser> {
           "--disable-dev-shm-usage",
         ],
         executablePath,
-        headless: chromium.headless,
+        headless: true,
         ...(proxy ? { proxy } : {}),
       });
     })().catch((error) => {
