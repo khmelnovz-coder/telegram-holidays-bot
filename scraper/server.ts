@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { access } from "node:fs/promises";
 import type { Browser, BrowserContext, Page } from "playwright-core";
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -22,6 +23,7 @@ class ScraperError extends Error {
       | "page_error"
       | "proxy_error"
       | "upstream_error",
+    readonly diagnostic?: string,
   ) {
     super(message);
   }
@@ -59,6 +61,7 @@ async function getBrowser(): Promise<Browser> {
         import("playwright-core"),
       ]);
       const executablePath = await chromium.executablePath();
+      await access(executablePath);
       const proxyServer = process.env.SCRAPER_PROXY_SERVER;
       const proxyUsername = process.env.SCRAPER_PROXY_USERNAME;
       const proxyPassword = process.env.SCRAPER_PROXY_PASSWORD;
@@ -82,6 +85,8 @@ async function getBrowser(): Promise<Browser> {
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--no-zygote",
         ],
         executablePath,
         headless: true,
@@ -94,9 +99,12 @@ async function getBrowser(): Promise<Browser> {
         message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
         proxyConfigured: Boolean(process.env.SCRAPER_PROXY_SERVER),
       });
+      const diagnostic =
+        error instanceof Error ? `${error.name}: ${error.message.slice(0, 180)}` : "UnknownError";
       throw new ScraperError(
         "Браузер scraper не запустился",
         process.env.SCRAPER_PROXY_SERVER ? "proxy_error" : "browser_launch",
+        diagnostic,
       );
     });
   }
@@ -255,8 +263,9 @@ function handler(request: IncomingMessage, response: ServerResponse): void {
       json(response, 502, {
         error: "Holiday scraper unavailable",
         detail,
-        errorName: diagnostic.name,
-        errorMessage: diagnostic.message,
+        errorName: error instanceof ScraperError && error.diagnostic ? "ScraperError" : diagnostic.name,
+        errorMessage:
+          error instanceof ScraperError && error.diagnostic ? error.diagnostic : diagnostic.message,
         fallback: "retry_later",
       });
     }
