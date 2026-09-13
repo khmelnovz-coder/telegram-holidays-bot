@@ -12,6 +12,15 @@ interface HolidayResult {
   holidays: string[];
 }
 
+class ScraperError extends Error {
+  constructor(
+    message: string,
+    readonly detail: "cloudflare_challenge" | "timeout" | "parse_error" | "upstream_error",
+  ) {
+    super(message);
+  }
+}
+
 let contextPromise: Promise<BrowserContext> | undefined;
 let requestLock = Promise.resolve();
 
@@ -95,7 +104,7 @@ async function scrapeToday(): Promise<HolidayResult> {
       preview: bodyText.slice(0, 200),
     });
     if (/проверка безопасности|enable javascript|captcha/i.test(bodyText)) {
-      throw new Error("Сайт запросил проверку безопасности");
+      throw new ScraperError("Сайт запросил проверку безопасности", "cloudflare_challenge");
     }
     const structuredText = await page
       .locator("h1, h2, h3, h4, li, article p, .holiday, .holidays")
@@ -145,13 +154,26 @@ function handler(request: IncomingMessage, response: ServerResponse): void {
       const result = await Promise.race([
         scrapeToday(),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Scraper request timed out")), REQUEST_TIMEOUT_MS),
+          setTimeout(
+            () => reject(new ScraperError("Scraper request timed out", "timeout")),
+            REQUEST_TIMEOUT_MS,
+          ),
         ),
       ]);
       json(response, 200, result);
     } catch (error) {
       console.error("Holiday scraper request failed", error);
-      json(response, 502, { error: "Holiday scraper unavailable" });
+      const detail =
+        error instanceof ScraperError
+          ? error.detail
+          : error instanceof Error && /parse|праздник/i.test(error.message)
+            ? "parse_error"
+            : "upstream_error";
+      json(response, 502, {
+        error: "Holiday scraper unavailable",
+        detail,
+        fallback: "retry_later",
+      });
     }
   });
 }

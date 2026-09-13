@@ -15,6 +15,12 @@ interface HolidayResult {
   holidays: string[];
 }
 
+class ScraperApiError extends Error {
+  constructor(readonly detail: string) {
+    super(`Scraper API error: ${detail}`);
+  }
+}
+
 async function getTodayHolidays(): Promise<HolidayResult> {
   const scraperUrl = process.env.SCRAPER_URL?.replace(/\/+$/, "");
   const scraperApiKey = process.env.SCRAPER_API_KEY;
@@ -32,7 +38,14 @@ async function getTodayHolidays(): Promise<HolidayResult> {
     const body = await scraperResponse.text();
     if (!scraperResponse.ok) {
       console.error("Scraper API error", scraperResponse.status, body);
-      throw new Error(`Scraper API вернул ${scraperResponse.status}`);
+      let detail = "upstream_error";
+      try {
+        const parsed = JSON.parse(body) as { detail?: unknown };
+        if (typeof parsed.detail === "string") detail = parsed.detail;
+      } catch {
+        console.error("Scraper API returned non-JSON error body");
+      }
+      throw new ScraperApiError(detail);
     }
 
     const result = JSON.parse(body) as HolidayResult;
@@ -120,7 +133,9 @@ export default async function handler(
     console.error("Webhook processing failed", error);
     await sendTelegramMessage(
       message.chat.id,
-      "Не удалось получить праздники. Попробуйте еще раз позже.",
+      error instanceof ScraperApiError && error.detail === "cloudflare_challenge"
+        ? "Источник праздников временно запросил проверку безопасности. Попробуйте еще раз через несколько минут."
+        : "Не удалось получить праздники. Попробуйте еще раз позже.",
     );
   }
 
