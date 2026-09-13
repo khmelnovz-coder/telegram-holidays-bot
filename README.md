@@ -2,7 +2,7 @@
 
 Telegram-бот на TypeScript/Node.js, который по команде `/today` получает праздники текущего дня с [kakoysegodnyaprazdnik.ru](https://kakoysegodnyaprazdnik.ru/). Chromium вынесен в отдельный HTTP-сервис `scraper/server.ts`, предназначенный для деплоя на Render. Vercel serverless function только вызывает этот сервис и не запускает браузер.
 
-Сайт может отдавать Cloudflare/security challenge или блокировать автоматизированный браузер. Сервис использует persistent Chromium context, реалистичные заголовки и user-agent и логирует обнаружение challenge, но не гарантирует его обход.
+Сайт может отдавать Cloudflare/security challenge или блокировать автоматизированный браузер. Сервис переиспользует запущенный Chromium process между запросами, создаёт изолированный context на запрос, использует реалистичные заголовки и user-agent и логирует обнаружение challenge, но не гарантирует его обход.
 
 ## Деплой scraper на Render
 
@@ -26,7 +26,7 @@ Telegram-бот на TypeScript/Node.js, который по команде `/to
 Render запускает Dockerfile на `0.0.0.0:$PORT`; сервис поддерживает `GET` и `POST /today`, `GET /health`.
 `/health` не импортирует и не запускает Chromium и отвечает синхронно с HTTP 200, поэтому ошибки браузера не должны влиять на health check. Если публичный URL временно возвращает 503 сразу после периода без запросов, это cold start/sleep самого Render Free: инфраструктура ещё не запустила контейнер, и код приложения в этот момент не выполняется. Для постоянного health 200 используйте Starter или выше (в `render.yaml` указан `plan: starter`) и дождитесь завершения deploy; после пробуждения повторите запрос через 30–60 секунд.
 
-Если сайт отдаёт Cloudflare/security challenge или отклоняет запрос по региону, `GET/POST /today` возвращает HTTP 502 с безопасным `detail: "cloudflare_challenge"` либо `"regional_block"` и `fallback: "retry_later"`; HTML страницы, токены и другие секреты в ответ не включаются. Vercel логирует диагностическую причину и отправляет пользователю понятное сообщение. Для региональной блокировки настройте `SCRAPER_PROXY_SERVER` на Render; бот не падает и не делает ложный ответ.
+Если сайт отдаёт Cloudflare/security challenge или отклоняет запрос по региону, `GET/POST /today` возвращает HTTP 502 с безопасным `detail: "cloudflare_challenge"` либо `"regional_block"` и `fallback: "retry_later"`. Ошибки запуска Chromium дополнительно содержат ограниченные `errorName`/`errorMessage` (до 200 символов), без HTML, токенов, proxy credentials и путей. Для региональной блокировки настройте `SCRAPER_PROXY_SERVER` на Render; бот не падает и не делает ложный ответ.
 
 ## Деплой на Vercel
 

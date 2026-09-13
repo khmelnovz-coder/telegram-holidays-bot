@@ -1,10 +1,8 @@
-import { mkdir } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { BrowserContext, Page } from "playwright-core";
+import type { Browser, BrowserContext, Page } from "playwright-core";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const HOLIDAYS_URL = "https://kakoysegodnyaprazdnik.ru/";
-const PROFILE_DIR = process.env.SCRAPER_PROFILE_DIR ?? "/tmp/holiday-scraper-profile";
 const REQUEST_TIMEOUT_MS = 30_000;
 
 interface HolidayResult {
@@ -29,7 +27,7 @@ class ScraperError extends Error {
   }
 }
 
-let contextPromise: Promise<BrowserContext> | undefined;
+let browserPromise: Promise<Browser> | undefined;
 let requestLock = Promise.resolve();
 
 function parseHolidayText(text: string, date: string): HolidayResult {
@@ -53,14 +51,13 @@ function parseHolidayText(text: string, date: string): HolidayResult {
   return { date, holidays };
 }
 
-async function getBrowserContext(): Promise<BrowserContext> {
-  if (!contextPromise) {
-    contextPromise = (async () => {
+async function getBrowser(): Promise<Browser> {
+  if (!browserPromise) {
+    browserPromise = (async () => {
       const [{ default: chromium }, { chromium: playwrightChromium }] = await Promise.all([
         import("@sparticuz/chromium"),
         import("playwright-core"),
       ]);
-      await mkdir(PROFILE_DIR, { recursive: true });
       const executablePath = await chromium.executablePath();
       const proxyServer = process.env.SCRAPER_PROXY_SERVER;
       const proxyUsername = process.env.SCRAPER_PROXY_USERNAME;
@@ -74,28 +71,24 @@ async function getBrowserContext(): Promise<BrowserContext> {
         : undefined;
       console.info("Holiday browser starting", {
         executablePath,
-        profileDir: PROFILE_DIR,
         proxyConfigured: Boolean(proxyServer),
       });
       if (!proxyServer) {
         console.info("Holiday scraper using direct connection; no proxy configured");
       }
-      return playwrightChromium.launchPersistentContext(PROFILE_DIR, {
-        args: chromium.args,
+      return playwrightChromium.launch({
+        args: [
+          ...chromium.args,
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+        ],
         executablePath,
-        headless: true,
-        locale: "ru-RU",
-        viewport: { width: 1280, height: 900 },
-        userAgent:
-          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-        extraHTTPHeaders: {
-          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-        },
+        headless: chromium.headless,
         ...(proxy ? { proxy } : {}),
       });
     })().catch((error) => {
-      contextPromise = undefined;
+      browserPromise = undefined;
       console.error("Holiday browser initialization failed", {
         name: error instanceof Error ? error.name : "UnknownError",
         message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
@@ -107,11 +100,30 @@ async function getBrowserContext(): Promise<BrowserContext> {
       );
     });
   }
-  return contextPromise;
+  return browserPromise;
 }
 
 async function scrapeToday(): Promise<HolidayResult> {
-  const context = await getBrowserContext();
+  const browser = await getBrowser();
+  let context: BrowserContext;
+  try {
+    context = await browser.newContext({
+      locale: "ru-RU",
+      viewport: { width: 1280, height: 900 },
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+      extraHTTPHeaders: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+      },
+    });
+  } catch (error) {
+    console.error("Holiday browser context failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
+    });
+    throw new ScraperError("Контекст scraper не создан", "browser_launch");
+  }
   let page: Page;
   try {
     page = await context.newPage();
@@ -177,6 +189,9 @@ async function scrapeToday(): Promise<HolidayResult> {
     } catch (error) {
       console.error("Holiday page close failed", error);
     }
+    await context.close().catch((error) => {
+      console.error("Holiday context close failed", error);
+    });
   }
 }
 
@@ -224,6 +239,13 @@ function handler(request: IncomingMessage, response: ServerResponse): void {
       json(response, 200, result);
     } catch (error) {
       console.error("Holiday scraper request failed", error);
+      const diagnostic =
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message.slice(0, 200),
+            }
+          : { name: "UnknownError", message: "Unknown scraper error" };
       const detail =
         error instanceof ScraperError
           ? error.detail
@@ -233,6 +255,8 @@ function handler(request: IncomingMessage, response: ServerResponse): void {
       json(response, 502, {
         error: "Holiday scraper unavailable",
         detail,
+        errorName: diagnostic.name,
+        errorMessage: diagnostic.message,
         fallback: "retry_later",
       });
     }
