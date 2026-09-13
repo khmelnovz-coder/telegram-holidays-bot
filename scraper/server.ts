@@ -167,6 +167,7 @@ async function scrapeToday(): Promise<HolidayResult> {
         await page.waitForTimeout(2_000);
       }
     }
+
     const bodyText = await page.locator("body").innerText();
     console.info("Holiday page text collected", {
       characters: bodyText.length,
@@ -190,7 +191,9 @@ async function scrapeToday(): Promise<HolidayResult> {
       message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
       proxyConfigured: Boolean(process.env.SCRAPER_PROXY_SERVER),
     });
-    throw new ScraperError("Источник праздников недоступен", "page_error");
+    const diagnostic =
+      error instanceof Error ? `${error.name}: ${error.message.slice(0, 180)}` : "UnknownError";
+    throw new ScraperError("Источник праздников недоступен", "page_error", diagnostic);
   } finally {
     try {
       await page.close();
@@ -200,6 +203,22 @@ async function scrapeToday(): Promise<HolidayResult> {
     await context.close().catch((error) => {
       console.error("Holiday context close failed", error);
     });
+  }
+}
+
+async function scrapeTodayWithRetry(): Promise<HolidayResult> {
+  try {
+    return await scrapeToday();
+  } catch (error) {
+    const retryable =
+      error instanceof ScraperError &&
+      (error.detail === "page_error" || error.detail === "timeout");
+    if (!retryable) throw error;
+
+    console.warn("Retrying transient holiday scrape failure", {
+      detail: error.detail,
+    });
+    return scrapeToday();
   }
 }
 
@@ -236,7 +255,7 @@ function handler(request: IncomingMessage, response: ServerResponse): void {
   requestLock = requestLock.then(async () => {
     try {
       const result = await Promise.race([
-        scrapeToday(),
+        scrapeTodayWithRetry(),
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new ScraperError("Scraper request timed out", "timeout")),

@@ -39,8 +39,20 @@ async function getTodayHolidays(): Promise<HolidayResult> {
     if (!scraperResponse.ok) {
       let detail = "upstream_error";
       try {
-        const parsed = JSON.parse(body) as { detail?: unknown };
+        const parsed = JSON.parse(body) as {
+          detail?: unknown;
+          errorName?: unknown;
+          errorMessage?: unknown;
+        };
         if (typeof parsed.detail === "string") detail = parsed.detail;
+        console.error("Scraper API diagnostic", {
+          detail,
+          errorName: typeof parsed.errorName === "string" ? parsed.errorName : "unknown",
+          errorMessage:
+            typeof parsed.errorMessage === "string"
+              ? parsed.errorMessage.slice(0, 200)
+              : "unknown",
+        });
       } catch {
         console.error("Scraper API returned non-JSON error body");
       }
