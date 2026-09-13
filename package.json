@@ -1,0 +1,23 @@
+{
+  "name": "telegram-holidays-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Telegram bot that replies with today's holidays",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "start:scraper": "node dist/scraper/server.js"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^133.0.0",
+    "playwright-core": "^1.52.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@vercel/node": "^5.1.14",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}
