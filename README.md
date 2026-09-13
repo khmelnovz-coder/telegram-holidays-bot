@@ -8,14 +8,15 @@ Telegram-бот на TypeScript/Node.js, который по команде `/to
 
 1. Создайте новый Render Web Service из этого репозитория. Render обнаружит `Dockerfile` (или используйте `render.yaml`).
 2. Задайте секретную переменную `SCRAPER_API_KEY` в настройках Render. Используйте длинное случайное значение; не добавляйте его в git.
-3. После деплоя проверьте публичный health endpoint:
+3. Если источник доступен только из России, задайте в Render переменную `SCRAPER_PROXY_SERVER` с адресом российского HTTP(S)/SOCKS5 proxy. При необходимости добавьте `SCRAPER_PROXY_USERNAME` и `SCRAPER_PROXY_PASSWORD` как secret variables. Прокси не зашит в код; если `SCRAPER_PROXY_SERVER` пуст, scraper работает напрямую и пишет это в лог.
+4. После деплоя проверьте публичный health endpoint:
 
    ```bash
    curl https://<scraper-домен>.onrender.com/health
    ```
 
    Ожидаемый ответ: `{"ok":true}`.
-4. Проверьте защищённый endpoint:
+5. Проверьте защищённый endpoint:
 
    ```bash
    curl -H "x-api-key: <SCRAPER_API_KEY>" \
@@ -25,7 +26,7 @@ Telegram-бот на TypeScript/Node.js, который по команде `/to
 Render запускает Dockerfile на `0.0.0.0:$PORT`; сервис поддерживает `GET` и `POST /today`, `GET /health`.
 `/health` не импортирует и не запускает Chromium и отвечает синхронно с HTTP 200, поэтому ошибки браузера не должны влиять на health check. Если публичный URL временно возвращает 503 сразу после периода без запросов, это cold start/sleep самого Render Free: инфраструктура ещё не запустила контейнер, и код приложения в этот момент не выполняется. Для постоянного health 200 используйте Starter или выше (в `render.yaml` указан `plan: starter`) и дождитесь завершения deploy; после пробуждения повторите запрос через 30–60 секунд.
 
-Если сайт отдаёт Cloudflare/security challenge, `GET/POST /today` возвращает HTTP 502 с безопасным `detail: "cloudflare_challenge"` и `fallback: "retry_later"`; HTML страницы, токены и другие секреты в ответ не включаются. Vercel логирует диагностическую причину и отправляет пользователю понятное сообщение с предложением повторить запрос позже. Это рабочий fallback для временной блокировки источника: бот не падает и не делает ложный ответ.
+Если сайт отдаёт Cloudflare/security challenge или отклоняет запрос по региону, `GET/POST /today` возвращает HTTP 502 с безопасным `detail: "cloudflare_challenge"` либо `"regional_block"` и `fallback: "retry_later"`; HTML страницы, токены и другие секреты в ответ не включаются. Vercel логирует диагностическую причину и отправляет пользователю понятное сообщение. Для региональной блокировки настройте `SCRAPER_PROXY_SERVER` на Render; бот не падает и не делает ложный ответ.
 
 ## Деплой на Vercel
 

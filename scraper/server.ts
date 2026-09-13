@@ -15,7 +15,12 @@ interface HolidayResult {
 class ScraperError extends Error {
   constructor(
     message: string,
-    readonly detail: "cloudflare_challenge" | "timeout" | "parse_error" | "upstream_error",
+    readonly detail:
+      | "cloudflare_challenge"
+      | "regional_block"
+      | "timeout"
+      | "parse_error"
+      | "upstream_error",
   ) {
     super(message);
   }
@@ -54,7 +59,24 @@ async function getBrowserContext(): Promise<BrowserContext> {
       ]);
       await mkdir(PROFILE_DIR, { recursive: true });
       const executablePath = await chromium.executablePath();
-      console.info("Holiday browser starting", { executablePath, profileDir: PROFILE_DIR });
+      const proxyServer = process.env.SCRAPER_PROXY_SERVER;
+      const proxyUsername = process.env.SCRAPER_PROXY_USERNAME;
+      const proxyPassword = process.env.SCRAPER_PROXY_PASSWORD;
+      const proxy = proxyServer
+        ? {
+            server: proxyServer,
+            ...(proxyUsername ? { username: proxyUsername } : {}),
+            ...(proxyPassword ? { password: proxyPassword } : {}),
+          }
+        : undefined;
+      console.info("Holiday browser starting", {
+        executablePath,
+        profileDir: PROFILE_DIR,
+        proxyConfigured: Boolean(proxyServer),
+      });
+      if (!proxyServer) {
+        console.info("Holiday scraper using direct connection; no proxy configured");
+      }
       return playwrightChromium.launchPersistentContext(PROFILE_DIR, {
         args: chromium.args,
         executablePath,
@@ -67,6 +89,7 @@ async function getBrowserContext(): Promise<BrowserContext> {
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
         },
+        ...(proxy ? { proxy } : {}),
       });
     })().catch((error) => {
       contextPromise = undefined;
@@ -89,6 +112,12 @@ async function scrapeToday(): Promise<HolidayResult> {
       url: page.url(),
       title: await page.title(),
     });
+    if (navigation?.status() === 403 || navigation?.status() === 451) {
+      throw new ScraperError(
+        `Источник отклонил запрос (HTTP ${navigation.status()})`,
+        "regional_block",
+      );
+    }
     const challengeButton = page.locator("#cont");
     if (await challengeButton.count()) {
       console.info("Holiday site security challenge detected");

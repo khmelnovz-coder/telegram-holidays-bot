@@ -133,8 +133,9 @@ export default async function handler(
     console.error("Webhook processing failed", error);
     await sendTelegramMessage(
       message.chat.id,
-      error instanceof ScraperApiError && error.detail === "cloudflare_challenge"
-        ? "Источник праздников временно запросил проверку безопасности. Попробуйте еще раз через несколько минут."
+      error instanceof ScraperApiError &&
+      (error.detail === "cloudflare_challenge" || error.detail === "regional_block")
+        ? "Источник праздников недоступен из текущего региона или запросил проверку безопасности. Настройте российский proxy для scraper или попробуйте позже."
         : "Не удалось получить праздники. Попробуйте еще раз позже.",
     );
   }

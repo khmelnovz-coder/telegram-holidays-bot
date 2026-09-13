@@ -7,3 +7,9 @@ services:
     envVars:
       - key: SCRAPER_API_KEY
         sync: false
+      - key: SCRAPER_PROXY_SERVER
+        sync: false
+      - key: SCRAPER_PROXY_USERNAME
+        sync: false
+      - key: SCRAPER_PROXY_PASSWORD
+        sync: false
