@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { BrowserContext } from "playwright-core";
+import type { BrowserContext, Page } from "playwright-core";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const HOLIDAYS_URL = "https://kakoysegodnyaprazdnik.ru/";
@@ -20,6 +20,9 @@ class ScraperError extends Error {
       | "regional_block"
       | "timeout"
       | "parse_error"
+      | "browser_launch"
+      | "page_error"
+      | "proxy_error"
       | "upstream_error",
   ) {
     super(message);
@@ -93,7 +96,15 @@ async function getBrowserContext(): Promise<BrowserContext> {
       });
     })().catch((error) => {
       contextPromise = undefined;
-      throw error;
+      console.error("Holiday browser initialization failed", {
+        name: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
+        proxyConfigured: Boolean(process.env.SCRAPER_PROXY_SERVER),
+      });
+      throw new ScraperError(
+        "Браузер scraper не запустился",
+        process.env.SCRAPER_PROXY_SERVER ? "proxy_error" : "browser_launch",
+      );
     });
   }
   return contextPromise;
@@ -101,7 +112,16 @@ async function getBrowserContext(): Promise<BrowserContext> {
 
 async function scrapeToday(): Promise<HolidayResult> {
   const context = await getBrowserContext();
-  const page = await context.newPage();
+  let page: Page;
+  try {
+    page = await context.newPage();
+  } catch (error) {
+    console.error("Holiday page creation failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
+    });
+    throw new ScraperError("Страница scraper не создана", "page_error");
+  }
   try {
     const navigation = await page.goto(HOLIDAYS_URL, {
       waitUntil: "domcontentloaded",
@@ -143,8 +163,20 @@ async function scrapeToday(): Promise<HolidayResult> {
       timeZone: "Europe/Moscow",
     }).format(new Date());
     return parseHolidayText([...structuredText, bodyText].join("\n"), date);
+  } catch (error) {
+    if (error instanceof ScraperError) throw error;
+    console.error("Holiday page operation failed", {
+      name: error instanceof Error ? error.name : "UnknownError",
+      message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
+      proxyConfigured: Boolean(process.env.SCRAPER_PROXY_SERVER),
+    });
+    throw new ScraperError("Источник праздников недоступен", "page_error");
   } finally {
-    await page.close();
+    try {
+      await page.close();
+    } catch (error) {
+      console.error("Holiday page close failed", error);
+    }
   }
 }
 

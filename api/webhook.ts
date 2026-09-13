@@ -37,7 +37,6 @@ async function getTodayHolidays(): Promise<HolidayResult> {
     });
     const body = await scraperResponse.text();
     if (!scraperResponse.ok) {
-      console.error("Scraper API error", scraperResponse.status, body);
       let detail = "upstream_error";
       try {
         const parsed = JSON.parse(body) as { detail?: unknown };
@@ -45,6 +44,11 @@ async function getTodayHolidays(): Promise<HolidayResult> {
       } catch {
         console.error("Scraper API returned non-JSON error body");
       }
+      console.error("Scraper API error", {
+        status: scraperResponse.status,
+        detail,
+        bodyLength: body.length,
+      });
       throw new ScraperApiError(detail);
     }
 
