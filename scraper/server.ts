@@ -117,14 +117,18 @@ function authorized(request: IncomingMessage): boolean {
 }
 
 function json(response: ServerResponse, status: number, body: unknown): void {
-  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  response.writeHead(status, {
+    "cache-control": "no-store",
+    "content-type": "application/json; charset=utf-8",
+  });
   response.end(JSON.stringify(body));
 }
 
 function handler(request: IncomingMessage, response: ServerResponse): void {
   const path = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`).pathname;
   if (request.method === "GET" && path === "/health") {
-    json(response, 200, { ok: true });
+    // Keep health independent from Chromium so Render can probe it during startup.
+    json(response, 200, { ok: true, uptimeSeconds: Math.floor(process.uptime()) });
     return;
   }
   if ((request.method !== "GET" && request.method !== "POST") || path !== "/today") {
