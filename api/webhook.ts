@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const TELEGRAM_API = "https://api.telegram.org";
-const SCRAPER_ATTEMPT_TIMEOUT_MS = 10_000;
+const SCRAPER_ATTEMPT_TIMEOUT_MS = 14_000;
 const SCRAPER_RETRY_DELAY_MS = 750;
 
 interface TelegramUpdate {
