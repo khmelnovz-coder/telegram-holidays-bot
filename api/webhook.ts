@@ -13,6 +13,7 @@ interface TelegramUpdate {
 interface HolidayResult {
   date: string;
   holidays: string[];
+  source?: "scraper" | "local-calendar";
 }
 
 class ScraperApiError extends Error {
@@ -21,13 +22,51 @@ class ScraperApiError extends Error {
   }
 }
 
+function getLocalTodayHolidays(): HolidayResult {
+  const now = new Date();
+  const date = new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "long",
+    timeZone: "Europe/Moscow",
+  }).format(now);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const monthDay = `${values.month}-${values.day}`;
+  const holidays: string[] = [];
+  const fixedHolidays: Record<string, string> = {
+    "01-01": "Новый год",
+    "01-07": "Рождество Христово",
+    "02-23": "День защитника Отечества",
+    "03-08": "Международный женский день",
+    "05-01": "Праздник Весны и Труда",
+    "05-09": "День Победы",
+    "06-12": "День России",
+    "11-04": "День народного единства",
+  };
+  if (fixedHolidays[monthDay]) holidays.push(fixedHolidays[monthDay]);
+  if (values.weekday === "Sat" || values.weekday === "Sun") {
+    holidays.push("Выходной день");
+  }
+  if (holidays.length === 0) {
+    holidays.push("Памятная дата или праздник не определены локальным календарём");
+  }
+  return { date, holidays, source: "local-calendar" };
+}
+
 async function getTodayHolidays(): Promise<HolidayResult> {
   const scraperUrl = process.env.SCRAPER_URL?.replace(/\/+$/, "");
   const scraperApiKey = process.env.SCRAPER_API_KEY;
-  if (!scraperUrl || !scraperApiKey) {
-    throw new Error("SCRAPER_URL или SCRAPER_API_KEY не заданы");
+  if (process.env.SCRAPER_FREE_MODE === "true" || !scraperUrl || !scraperApiKey) {
+    console.info("Using free local calendar mode", {
+      reason: process.env.SCRAPER_FREE_MODE === "true" ? "configured" : "scraper_not_configured",
+    });
+    return getLocalTodayHolidays();
   }
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SCRAPER_REQUEST_TIMEOUT_MS);
   try {
@@ -150,7 +189,7 @@ export default async function handler(
       const result = await getTodayHolidays();
       await sendTelegramMessage(
         message.chat.id,
-        `Праздники на ${result.date}:\n\n${result.holidays.map((holiday) => `• ${holiday}`).join("\n")}`,
+        `${result.source === "local-calendar" ? "Локальный бесплатный режим (без парсинга сайта)\n" : ""}Праздники на ${result.date}:\n\n${result.holidays.map((holiday) => `• ${holiday}`).join("\n")}`,
       );
     }
   } catch (error) {
