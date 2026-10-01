@@ -112,35 +112,53 @@ async function getBrowser(): Promise<Browser> {
 }
 
 async function scrapeToday(): Promise<HolidayResult> {
-  const browser = await getBrowser();
-  let context: BrowserContext;
-  try {
-    context = await browser.newContext({
-      locale: "ru-RU",
-      viewport: { width: 1280, height: 900 },
-      userAgent:
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-      extraHTTPHeaders: {
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
-      },
-    });
-  } catch (error) {
-    console.error("Holiday browser context failed", {
-      name: error instanceof Error ? error.name : "UnknownError",
-      message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
-    });
+  let browser: Browser;
+  let context: BrowserContext | undefined;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    browser = await getBrowser();
+    try {
+      context = await browser.newContext({
+        locale: "ru-RU",
+        viewport: { width: 1280, height: 900 },
+        userAgent:
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+        extraHTTPHeaders: {
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        },
+      });
+      break;
+    } catch (error) {
+      const diagnostic =
+        error instanceof Error ? `${error.name}: ${error.message.slice(0, 180)}` : "UnknownError";
+      console.error("Holiday browser context failed", {
+        attempt,
+        name: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
+      });
+      if (attempt === 2) {
+        throw new ScraperError("Контекст scraper не создан", "browser_launch", diagnostic);
+      }
+      browserPromise = undefined;
+      await browser.close().catch((closeError) => {
+        console.error("Holiday browser reset failed", closeError);
+      });
+    }
+  }
+  if (!context) {
     throw new ScraperError("Контекст scraper не создан", "browser_launch");
   }
   let page: Page;
   try {
     page = await context.newPage();
   } catch (error) {
+    const diagnostic =
+      error instanceof Error ? `${error.name}: ${error.message.slice(0, 180)}` : "UnknownError";
     console.error("Holiday page creation failed", {
       name: error instanceof Error ? error.name : "UnknownError",
       message: error instanceof Error ? error.message.slice(0, 200) : "Unknown error",
     });
-    throw new ScraperError("Страница scraper не создана", "page_error");
+    throw new ScraperError("Страница scraper не создана", "page_error", diagnostic);
   }
   try {
     const navigation = await page.goto(HOLIDAYS_URL, {
