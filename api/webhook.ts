@@ -1,7 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const TELEGRAM_API = "https://api.telegram.org";
-const SCRAPER_REQUEST_TIMEOUT_MS = 25_000;
+const SCRAPER_ATTEMPT_TIMEOUT_MS = 10_000;
+const SCRAPER_RETRY_DELAY_MS = 750;
 
 interface TelegramUpdate {
   message?: {
@@ -28,53 +29,72 @@ async function getTodayHolidays(): Promise<HolidayResult> {
     throw new Error("SCRAPER_URL или SCRAPER_API_KEY не заданы");
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), SCRAPER_REQUEST_TIMEOUT_MS);
-  try {
-    const scraperResponse = await fetch(`${scraperUrl}/today`, {
-      headers: { "x-api-key": scraperApiKey },
-      signal: controller.signal,
-    });
-    const body = await scraperResponse.text();
-    if (!scraperResponse.ok) {
-      let detail = "upstream_error";
-      try {
-        const parsed = JSON.parse(body) as {
-          detail?: unknown;
-          errorName?: unknown;
-          errorMessage?: unknown;
-        };
-        if (typeof parsed.detail === "string") detail = parsed.detail;
-        console.error("Scraper API diagnostic", {
-          detail,
-          errorName: typeof parsed.errorName === "string" ? parsed.errorName : "unknown",
-          errorMessage:
-            typeof parsed.errorMessage === "string"
-              ? parsed.errorMessage.slice(0, 200)
-              : "unknown",
-        });
-      } catch {
-        console.error("Scraper API returned non-JSON error body");
-      }
-      console.error("Scraper API error", {
-        status: scraperResponse.status,
-        detail,
-        bodyLength: body.length,
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SCRAPER_ATTEMPT_TIMEOUT_MS);
+    try {
+      const scraperResponse = await fetch(`${scraperUrl}/today`, {
+        headers: { "x-api-key": scraperApiKey },
+        signal: controller.signal,
       });
-      throw new ScraperApiError(detail);
-    }
+      const body = await scraperResponse.text();
+      if (!scraperResponse.ok) {
+        let detail = "upstream_error";
+        try {
+          const parsed = JSON.parse(body) as {
+            detail?: unknown;
+            errorName?: unknown;
+            errorMessage?: unknown;
+          };
+          if (typeof parsed.detail === "string") detail = parsed.detail;
+          console.error("Scraper API diagnostic", {
+            detail,
+            errorName: typeof parsed.errorName === "string" ? parsed.errorName : "unknown",
+            errorMessage:
+              typeof parsed.errorMessage === "string"
+                ? parsed.errorMessage.slice(0, 200)
+                : "unknown",
+          });
+        } catch {
+          console.error("Scraper API returned non-JSON error body");
+        }
+        console.error("Scraper API error", {
+          attempt,
+          status: scraperResponse.status,
+          detail,
+          bodyLength: body.length,
+        });
+        throw new ScraperApiError(detail);
+      }
 
-    const result = JSON.parse(body) as HolidayResult;
-    if (!result.date || !Array.isArray(result.holidays) || result.holidays.length === 0) {
-      throw new Error("Scraper API вернул некорректный список праздников");
+      const result = JSON.parse(body) as HolidayResult;
+      if (!result.date || !Array.isArray(result.holidays) || result.holidays.length === 0) {
+        throw new Error("Scraper API вернул некорректный список праздников");
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        console.warn("Scraper request timed out", {
+          attempt,
+          timeoutMs: SCRAPER_ATTEMPT_TIMEOUT_MS,
+        });
+        if (attempt === 1) {
+          await new Promise((resolve) => setTimeout(resolve, SCRAPER_RETRY_DELAY_MS));
+          continue;
+        }
+        throw new Error("Scraper request timed out after bounded retries");
+      }
+      console.error("Scraper request failed", {
+        attempt,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-    return result;
-  } catch (error) {
-    console.error("Scraper request failed", error);
-    throw error;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw new Error("Scraper request failed");
 }
 
 async function sendTelegramMessage(chatId: number, text: string): Promise<boolean> {
